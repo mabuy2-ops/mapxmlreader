@@ -1,0 +1,14 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# 生成ファイル・テスト出力
+*.dxf
+*.zip
+*.shp.zip
+sample_extracted/
+
+# その他
+.env
+*.log

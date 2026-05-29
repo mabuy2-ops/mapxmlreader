@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>地籍図XML → DXF 変換</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: 'Segoe UI','Hiragino Sans','Yu Gothic UI',sans-serif;
+  background: #0f1117; color: #e2e8f0;
+  min-height: 100vh; display: flex;
+  align-items: center; justify-content: center; padding: 24px;
+}
+.card {
+  background: #1a1f2e; border: 1px solid #2d3748; border-radius: 16px;
+  padding: 40px 44px; width: 100%; max-width: 520px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.5);
+}
+.header h1 { font-size: 1.4rem; font-weight: 700; color: #63b3ed; margin-bottom: 4px; }
+.header p  { font-size: .85rem; color: #718096; margin-bottom: 32px; }
+.badge {
+  display: inline-block; font-size: .72rem; background: rgba(72,187,120,.15);
+  color: #68d391; border: 1px solid rgba(72,187,120,.35);
+  border-radius: 4px; padding: 2px 8px; margin-left: 8px; vertical-align: middle;
+}
+.drop-zone {
+  border: 2px dashed #2d3748; border-radius: 10px; padding: 40px 20px;
+  text-align: center; cursor: pointer;
+  transition: border-color .2s, background .2s; user-select: none;
+}
+.drop-zone:hover, .drop-zone.drag-over { border-color: #63b3ed; background: rgba(99,179,237,.06); }
+.drop-zone .icon  { font-size: 2.8rem; margin-bottom: 12px; display: block; }
+.drop-zone .main  { font-size: .95rem; color: #a0aec0; }
+.drop-zone .sub   { font-size: .8rem; color: #4a5568; margin-top: 6px; }
+input[type="file"] { display: none; }
+.file-badge {
+  display: none; align-items: center; gap: 10px; margin-top: 14px;
+  padding: 10px 14px; background: rgba(99,179,237,.1);
+  border: 1px solid rgba(99,179,237,.3); border-radius: 8px;
+}
+.file-badge .icon { font-size: 1.3rem; }
+.file-badge .info { flex: 1; min-width: 0; }
+.file-badge .name { font-size: .9rem; color: #63b3ed; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.file-badge .size { font-size: .78rem; color: #718096; }
+.file-badge .rm   { background: none; border: none; color: #4a5568; cursor: pointer; font-size: 1.1rem; padding: 2px 6px; border-radius: 4px; }
+.file-badge .rm:hover { color: #fc8181; }
+.btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; margin-top: 20px; padding: 14px;
+  background: #3182ce; color: #fff; border: none; border-radius: 8px;
+  font-size: 1rem; font-weight: 600; cursor: pointer; transition: background .2s, opacity .2s;
+}
+.btn:hover:not(:disabled) { background: #2b6cb0; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.progress-section { display: none; margin-top: 20px; }
+.progress-track { background: #2d3748; border-radius: 999px; height: 5px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg,#3182ce,#63b3ed); width: 0%; border-radius: 999px; transition: width .3s ease; }
+.progress-label { margin-top: 10px; font-size: .85rem; color: #718096; text-align: center; }
+.warn-box    { display: none; margin-top: 12px; padding: 10px 14px; background: rgba(237,137,54,.1); border: 1px solid rgba(237,137,54,.4); border-radius: 8px; color: #f6ad55; font-size: .83rem; }
+.error-box   { display: none; margin-top: 16px; padding: 12px 16px; background: rgba(245,101,101,.1); border: 1px solid rgba(245,101,101,.4); border-radius: 8px; color: #fc8181; font-size: .88rem; }
+.success-box { display: none; margin-top: 16px; padding: 12px 16px; background: rgba(72,187,120,.1); border: 1px solid rgba(72,187,120,.35); border-radius: 8px; color: #68d391; font-size: .88rem; }
+.layer-info  { margin-top: 28px; padding: 16px; background: rgba(255,255,255,.02); border: 1px solid #2d3748; border-radius: 10px; }
+.layer-info h3 { font-size: .82rem; text-transform: uppercase; letter-spacing: .08em; color: #4a5568; margin-bottom: 12px; }
+.layer-list    { list-style: none; display: grid; gap: 6px; }
+.layer-list li { display: flex; align-items: center; gap: 10px; font-size: .85rem; color: #a0aec0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="header">
+    <h1>地籍図XML → DXF 変換 <span class="badge">サーバー不要</span></h1>
+    <p>法務省地籍図XMLをCAD用DXFファイルに変換します（ブラウザのみで動作）</p>
+  </div>
+  <div class="drop-zone" id="dropZone">
+    <span class="icon">🗂️</span>
+    <div class="main">ZIPまたはXMLをここにドロップ</div>
+    <div class="sub">またはクリックしてファイルを選択</div>
+  </div>
+  <input type="file" id="fileInput" accept=".xml,.zip">
+  <div class="file-badge" id="fileBadge">
+    <span class="icon">📄</span>
+    <div class="info">
+      <div class="name" id="fileName">-</div>
+      <div class="size" id="fileSize">-</div>
+    </div>
+    <button class="rm" id="removeBtn">✕</button>
+  </div>
+  <button class="btn" id="convertBtn" disabled>変換してDXFをダウンロード</button>
+  <div class="progress-section" id="progressSection">
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-label" id="progressLabel">処理中...</div>
+  </div>
+  <div class="warn-box"    id="warnBox">大きいファイルの処理中はブラウザが一時的に応答しなくなる場合があります。そのままお待ちください。</div>
+  <div class="error-box"   id="errorBox"></div>
+  <div class="success-box" id="successBox"></div>
+  <div class="layer-info">
+    <h3>出力レイヤー（DXF）</h3>
+    <ul class="layer-list">
+      <li><span class="dot" style="background:#e53e3e"></span>BOUNDARY — 筆界線</li>
+      <li><span class="dot" style="background:#38a169"></span>LANDNUMBER — 地番テキスト</li>
+      <li><span class="dot" style="background:#3182ce"></span>BND_POINT — 筆界点</li>
+      <li><span class="dot" style="background:#d69e2e"></span>REF_POINT — 基準点</li>
+      <li><span class="dot" style="background:#e2e8f0"></span>FRAME — 図郭枠</li>
+    </ul>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+'use strict';
+
+const NS_ZMN = 'http://www.moj.go.jp/MINJI/tizuzumen';
+const NS_MAP = 'http://www.moj.go.jp/MINJI/tizuxml';
+
+/* ---- UI ---- */
+const dropZone      = document.getElementById('dropZone');
+const fileInput     = document.getElementById('fileInput');
+const fileBadge     = document.getElementById('fileBadge');
+const fileNameEl    = document.getElementById('fileName');
+const fileSizeEl    = document.getElementById('fileSize');
+const removeBtn     = document.getElementById('removeBtn');
+const convertBtn    = document.getElementById('convertBtn');
+const progressSec   = document.getElementById('progressSection');
+const progressFill  = document.getElementById('progressFill');
+const progressLabel = document.getElementById('progressLabel');
+const warnBox       = document.getElementById('warnBox');
+const errorBox      = document.getElementById('errorBox');
+const successBox    = document.getElementById('successBox');
+
+let selectedFile = null;
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault(); dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+removeBtn.addEventListener('click', e => { e.stopPropagation(); clearFile(); });
+
+function setFile(f) {
+  const ext = f.name.split('.').pop().toLowerCase();
+  if (ext !== 'xml' && ext !== 'zip') { showError('XMLまたはZIPファイルを選択してください'); return; }
+  selectedFile = f;
+  fileNameEl.textContent = f.name;
+  fileSizeEl.textContent = fmtSize(f.size);
+  fileBadge.style.display = 'flex';
+  convertBtn.disabled = false;
+  hideMessages();
+}
+function clearFile() {
+  selectedFile = null; fileInput.value = '';
+  fileBadge.style.display = 'none'; convertBtn.disabled = true; hideMessages();
+}
+function hideMessages() {
+  errorBox.style.display = 'none'; successBox.style.display = 'none';
+  progressSec.style.display = 'none'; warnBox.style.display = 'none';
+}
+function showError(msg) { errorBox.textContent = 'エラー: ' + msg; errorBox.style.display = 'block'; }
+function fmtSize(b) { return b >= 1048576 ? (b/1048576).toFixed(1)+' MB' : (b/1024).toFixed(0)+' KB'; }
+
+/* UI更新を可能にするための待機（requestAnimationFrame） */
+function uiYield() { return new Promise(r => requestAnimationFrame(r)); }
+
+function setProgress(v, msg) {
+  progressFill.style.width = v + '%';
+  progressLabel.textContent = msg;
+}
+
+/* ================================================================
+   メイン変換処理（メインスレッドで実行・DOMParser使用）
+   ================================================================ */
+convertBtn.addEventListener('click', async () => {
+  if (!selectedFile) return;
+  convertBtn.disabled = true;
+  hideMessages();
+  progressSec.style.display = 'block';
+  setProgress(0, 'ファイルを読み込み中...');
+
+  try {
+    const buffer = await selectedFile.arrayBuffer();
+    const bytes  = new Uint8Array(buffer);
+
+    // ZIP展開
+    let xmlText;
+    if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
+      if (typeof JSZip === 'undefined') throw new Error('JSZipが読み込まれていません。インターネット接続を確認してください。');
+      setProgress(3, 'ZIPを展開中...');
+      await uiYield();
+      const zip   = await JSZip.loadAsync(buffer);
+      const entry = Object.values(zip.files).find(f => f.name.toLowerCase().endsWith('.xml'));
+      if (!entry) throw new Error('ZIPファイル内にXMLファイルが見つかりません');
+      xmlText = await entry.async('string');
+    } else {
+      xmlText = new TextDecoder('utf-8').decode(bytes);
+    }
+
+    // ファイルサイズ警告（大きい場合）
+    if (xmlText.length > 10_000_000) {
+      warnBox.style.display = 'block';
+      await uiYield();
+    }
+
+    // XML解析（DOMParser はメインスレッドで常に動作する）
+    setProgress(8, 'XMLを解析中（しばらくお待ちください）...');
+    await uiYield();
+
+    const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    const parseErr = doc.querySelector('parsererror');
+    if (parseErr) throw new Error('XML解析エラー: ' + parseErr.textContent.slice(0, 200));
+
+    // データ抽出
+    setProgress(15, '座標点を抽出中...');
+    await uiYield();
+    const points = parsePoints(doc);
+
+    setProgress(30, `曲線を抽出中（${points.size}点）...`);
+    await uiYield();
+    const curves = parseCurves(doc, points);
+
+    setProgress(55, `面データを抽出中（${curves.size}曲線）...`);
+    await uiYield();
+    const surfaces = parseSurfaces(doc);
+
+    setProgress(62, '筆界データを抽出中...');
+    await uiYield();
+    const boundaryLines  = parseBoundaryLines(doc);
+    const boundaryPoints = parseBoundaryPoints(doc);
+    const refPoints      = parseRefPoints(doc);
+
+    setProgress(72, '筆データを抽出中...');
+    await uiYield();
+    const parcels = parseParcels(doc);
+
+    setProgress(80, '図郭を抽出中...');
+    await uiYield();
+    const frames = parseFrames(doc);
+
+    // DXF生成
+    setProgress(85, 'DXFを生成中...');
+    await uiYield();
+    const dxf = generateDxf({ points, curves, surfaces, boundaryLines, boundaryPoints, refPoints, parcels, frames });
+
+    // ダウンロード
+    setProgress(100, '完了！');
+    const blob = new Blob([dxf], { type: 'text/plain;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = selectedFile.name.replace(/\.[^.]+$/, '') + '.dxf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    const validBL = boundaryLines.filter(bl => bl.curveId && curves.has(bl.curveId)).length;
+    successBox.innerHTML =
+      `DXFをダウンロードしました: <b>${a.download}</b><br>` +
+      `座標点: ${points.size}点 ／ 曲線: ${curves.size}本 ／ 面: ${surfaces.size}面<br>` +
+      `筆界線: ${boundaryLines.length}本（描画: ${validBL}本）` +
+      ` ／ 筆: ${parcels.length}筆 ／ 点: ${boundaryPoints.length}点`;
+    successBox.style.display = 'block';
+
+  } catch(err) {
+    showError(err.message);
+    progressSec.style.display = 'none';
+    warnBox.style.display = 'none';
+    console.error(err);
+  } finally {
+    convertBtn.disabled = false;
+  }
+});
+
+/* ================================================================
+   XML パーサー（DOMParser API + getElementsByTagNameNS）
+   ================================================================ */
+
+function els(parent, ns, name) { return Array.from(parent.getElementsByTagNameNS(ns, name)); }
+function txt(el, ns, name) {
+  const f = el.getElementsByTagNameNS(ns, name);
+  return f.length ? (f[0].textContent || '').trim() : '';
+}
+
+function parsePoints(doc) {
+  const map = new Map();
+  for (const el of els(doc, NS_ZMN, 'GM_Point')) {
+    const id = el.getAttribute('id');
+    if (!id) continue;
+    // X/Y have no dots in name — getElementsByTagNameNS is reliable here
+    const xEl = el.getElementsByTagNameNS(NS_ZMN, 'X')[0];
+    const yEl = el.getElementsByTagNameNS(NS_ZMN, 'Y')[0];
+    if (xEl && yEl) map.set(id, [parseFloat(xEl.textContent), parseFloat(yEl.textContent)]);
+  }
+  return map;
+}
+
+function parseCurves(doc, points) {
+  const map = new Map();
+  for (const el of els(doc, NS_ZMN, 'GM_Curve')) {
+    const id = el.getAttribute('id');
+    if (!id) continue;
+    const coords = [];
+
+    // Direct coords: X/Y have no dots — getElementsByTagNameNS always works
+    const xEls = el.getElementsByTagNameNS(NS_ZMN, 'X');
+    const yEls = el.getElementsByTagNameNS(NS_ZMN, 'Y');
+    if (xEls.length > 0 && xEls.length === yEls.length) {
+      for (let i = 0; i < xEls.length; i++)
+        coords.push([parseFloat(xEls[i].textContent), parseFloat(yEls[i].textContent)]);
+    }
+
+    // Indirect refs: walk manually — avoids dot-in-localName quirk in getElementsByTagNameNS
+    if (coords.length === 0) {
+      const walkRef = node => {
+        for (let i = 0; i < node.childNodes.length; i++) {
+          const c = node.childNodes[i];
+          if (c.nodeType !== 1) continue;
+          if (c.namespaceURI === NS_ZMN && c.localName === 'GM_PointRef.point') {
+            const idref = c.getAttribute('idref');
+            if (idref && points.has(idref)) coords.push(points.get(idref));
+          } else { walkRef(c); }
+        }
+      };
+      walkRef(el);
+    }
+
+    if (coords.length >= 2) map.set(id, coords);
+  }
+  return map;
+}
+
+function parseSurfaces(doc) {
+  const map = new Map();
+  for (const el of els(doc, NS_ZMN, 'GM_Surface')) {
+    const id = el.getAttribute('id');
+    if (!id) continue;
+    const ids = [];
+    // Walk manually to avoid dot-in-localName issue with GM_CompositeCurve.generator
+    const walkGen = node => {
+      for (let i = 0; i < node.childNodes.length; i++) {
+        const c = node.childNodes[i];
+        if (c.nodeType !== 1) continue;
+        if (c.namespaceURI === NS_ZMN && c.localName === 'GM_CompositeCurve.generator') {
+          const idref = c.getAttribute('idref');
+          if (idref) ids.push(idref);
+        } else { walkGen(c); }
+      }
+    };
+    walkGen(el);
+    map.set(id, ids);
+  }
+  return map;
+}
+
+function parseBoundaryLines(doc) {
+  return els(doc, NS_MAP, '筆界線').map(el => {
+    const s = el.getElementsByTagNameNS(NS_MAP, '形状')[0];
+    return { curveId: s ? s.getAttribute('idref') : null };
+  });
+}
+
+function parseBoundaryPoints(doc) {
+  return els(doc, NS_MAP, '筆界点').map(el => {
+    const s = el.getElementsByTagNameNS(NS_MAP, '形状')[0];
+    return { pointId: s ? s.getAttribute('idref') : null };
+  });
+}
+
+function parseRefPoints(doc) {
+  return els(doc, NS_MAP, '基準点').map(el => {
+    const s = el.getElementsByTagNameNS(NS_MAP, '形状')[0];
+    return { name: txt(el, NS_MAP, '名称'), pointId: s ? s.getAttribute('idref') : null };
+  });
+}
+
+function parseParcels(doc) {
+  return els(doc, NS_MAP, '筆').map(el => {
+    const s = el.getElementsByTagNameNS(NS_MAP, '形状')[0];
+    return {
+      landNumber: txt(el, NS_MAP, '地番'),
+      surfaceId:  s ? s.getAttribute('idref') : null
+    };
+  });
+}
+
+function parseFrames(doc) {
+  return els(doc, NS_MAP, '図郭').map(el => {
+    const frame = { mapNumber: txt(el, NS_MAP, '地図番号'), scale: txt(el, NS_MAP, '縮尺分母') };
+    for (const cn of ['左下座標','右下座標','右上座標','左上座標']) {
+      const cEl = el.getElementsByTagNameNS(NS_MAP, cn)[0];
+      if (cEl) {
+        const xEl = cEl.getElementsByTagNameNS(NS_ZMN, 'X')[0];
+        const yEl = cEl.getElementsByTagNameNS(NS_ZMN, 'Y')[0];
+        if (xEl && yEl) frame[cn] = [parseFloat(xEl.textContent), parseFloat(yEl.textContent)];
+      }
+    }
+    return frame;
+  });
+}
+
+/* ================================================================
+   DXF 生成
+   ================================================================ */
+function generateDxf(data) {
+  const f   = n => (isFinite(n) ? n : 0).toFixed(3);
+  // 公共座標(X=北,Y=東)→DXF(X=東,Y=北) かつ m→mm 変換（JW-CAD は mm 単位）
+  const dxy = pt => [pt[1] * 1000, pt[0] * 1000];
+  const cen = pts => {
+    if (!pts.length) return null;
+    let sx = 0, sy = 0;
+    for (const p of pts) { sx += p[0]; sy += p[1]; }
+    return [sx/pts.length, sy/pts.length];
+  };
+
+  const { points, curves, surfaces, boundaryLines, boundaryPoints, refPoints, parcels, frames } = data;
+
+  // 図面範囲を曲線データから算出（JW-CADの初期表示位置に必要）
+  let x0=Infinity, y0=Infinity, x1=-Infinity, y1=-Infinity;
+  for (const coords of curves.values()) {
+    for (const pt of coords) {
+      const [dx,dy] = dxy(pt);
+      if (dx<x0) x0=dx; if (dx>x1) x1=dx;
+      if (dy<y0) y0=dy; if (dy>y1) y1=dy;
+    }
+  }
+  if (!isFinite(x0)) { x0=0; y0=0; x1=1000; y1=1000; }
+  const mg = Math.max(x1-x0, y1-y0) * 0.02;
+  // JW-CADはLIMMINを原点として扱うため、データ左下が原点付近になるようオフセット
+  const ox = x0 - mg;
+  const oy = y0 - mg;
+  const dxyT = pt => { const [px,py] = dxy(pt); return [px - ox, py - oy]; };
+  const lx1 = (x1 - x0) + 2 * mg;
+  const ly1 = (y1 - y0) + 2 * mg;
+
+  let scale = 500;
+  if (frames.length && frames[0].scale) scale = parseInt(frames[0].scale) || 500;
+  const th = scale * 3; // テキスト高さ mm（3mm@印刷スケール）
+
+  const o = [];
+  const e = (...a) => { for (const v of a) o.push(String(v)); };
+
+  // VPORTパラメーター（JW-CAD初期ビュー制御）
+  const vcx = lx1 / 2;
+  const vcy = ly1 / 2;
+  const vhh = ly1 * 1.15;
+  const var_ = Math.max(lx1 / vhh, 0.1);
+
+  /* HEADER (R12 / AC1009) */
+  e('  0','SECTION','  2','HEADER',
+    '  9','$ACADVER','  1','AC1009',
+    '  9','$EXTMIN',' 10',f(0),' 20',f(0),' 30','0.000',
+    '  9','$EXTMAX',' 10',f(lx1),' 20',f(ly1),' 30','0.000',
+    '  9','$LIMMIN',' 10',f(0),' 20',f(0),
+    '  9','$LIMMAX',' 10',f(lx1),' 20',f(ly1),
+    '  0','ENDSEC');
+
+  /* TABLES */
+  e('  0','SECTION','  2','TABLES');
+  // VPORT テーブル（初期ビューを設定）
+  e('  0','TABLE','  2','VPORT',' 70','1',
+    '  0','VPORT','  2','*ACTIVE',' 70','0',
+    ' 10','0.0',' 20','0.0',' 11','1.0',' 21','1.0',
+    ' 12',f(vcx),' 22',f(vcy),
+    ' 13','0.0',' 23','0.0',
+    ' 14','0.5',' 24','0.5',' 15','0.5',' 25','0.5',
+    ' 16','0.0',' 26','0.0',' 36','1.0',
+    ' 17','0.0',' 27','0.0',' 37','0.0',
+    ' 40',f(vhh),
+    ' 41',f(var_),
+    ' 42','50.0',' 43','0.0',' 44','0.0',
+    ' 50','0.0',' 51','0.0',
+    ' 71','0',' 72','1000',' 73','1',' 74','3',
+    ' 75','0',' 76','0',' 77','0',' 78','0',
+    '  0','ENDTAB');
+  // LTYPE テーブル（CONTINUOUSはLAYER参照前に必須）
+  e('  0','TABLE','  2','LTYPE',' 70','1',
+    '  0','LTYPE','  2','CONTINUOUS',' 70','0','  3','Solid line',' 72','65',' 73','0',' 40','0.0',
+    '  0','ENDTAB');
+  // LAYER テーブル
+  e('  0','TABLE','  2','LAYER',' 70','5');
+  for (const [nm, cl] of [['BOUNDARY',1],['LANDNUMBER',3],['BND_POINT',5],['REF_POINT',2],['FRAME',7]])
+    e('  0','LAYER','  2',nm,' 70','0',' 62',cl,'  6','CONTINUOUS');
+  e('  0','ENDTAB','  0','ENDSEC');
+
+  /* BLOCKS（R12では空でよい）*/
+  e('  0','SECTION','  2','BLOCKS','  0','ENDSEC');
+
+  /* ENTITIES */
+  e('  0','SECTION','  2','ENTITIES');
+
+  // 筆界線 → LINE
+  for (const bl of boundaryLines) {
+    if (!bl.curveId || !curves.has(bl.curveId)) continue;
+    const pts = curves.get(bl.curveId);
+    for (let i=0; i<pts.length-1; i++) {
+      const [ax,ay]=dxyT(pts[i]), [bx,by]=dxyT(pts[i+1]);
+      e('  0','LINE','  8','BOUNDARY',
+        ' 10',f(ax),' 20',f(ay),' 30','0.000',
+        ' 11',f(bx),' 21',f(by),' 31','0.000');
+    }
+  }
+
+  // 地番 → TEXT（重心位置）
+  for (const p of parcels) {
+    if (!p.landNumber || !p.surfaceId || !surfaces.has(p.surfaceId)) continue;
+    const allPts = [];
+    for (const cid of surfaces.get(p.surfaceId)) if (curves.has(cid)) allPts.push(...curves.get(cid));
+    const c = cen(allPts);
+    if (!c) continue;
+    const [cx,cy] = dxyT(c);
+    e('  0','TEXT','  8','LANDNUMBER',
+      ' 10',f(cx),' 20',f(cy),' 30','0.000',' 40',f(th),'  1',p.landNumber,
+      ' 72','1',' 73','2',' 11',f(cx),' 21',f(cy),' 31','0.000');
+  }
+
+  // 筆界点 → POINT
+  for (const bp of boundaryPoints) {
+    if (!bp.pointId || !points.has(bp.pointId)) continue;
+    const [px,py]=dxyT(points.get(bp.pointId));
+    e('  0','POINT','  8','BND_POINT',' 10',f(px),' 20',f(py),' 30','0.000');
+  }
+
+  // 基準点 → POINT + TEXT
+  for (const rp of refPoints) {
+    if (!rp.pointId || !points.has(rp.pointId)) continue;
+    const [px,py]=dxyT(points.get(rp.pointId));
+    e('  0','POINT','  8','REF_POINT',' 10',f(px),' 20',f(py),' 30','0.000');
+    if (rp.name) e('  0','TEXT','  8','REF_POINT',
+      ' 10',f(px+th),' 20',f(py+th),' 30','0.000',' 40',f(th*0.8),'  1',rp.name);
+  }
+
+  // 図郭 → LINE (矩形)
+  for (const fr of frames) {
+    const corners = ['左下座標','右下座標','右上座標','左上座標']
+                    .filter(n=>fr[n]).map(n=>dxyT(fr[n]));
+    if (corners.length===4) {
+      for (let i=0; i<4; i++) {
+        const [ax,ay]=corners[i], [bx,by]=corners[(i+1)%4];
+        e('  0','LINE','  8','FRAME',
+          ' 10',f(ax),' 20',f(ay),' 30','0.000',
+          ' 11',f(bx),' 21',f(by),' 31','0.000');
+      }
+      if (fr.mapNumber) {
+        const cx=corners.reduce((s,c)=>s+c[0],0)/4;
+        const cy=corners.reduce((s,c)=>s+c[1],0)/4;
+        e('  0','TEXT','  8','FRAME',
+          ' 10',f(cx),' 20',f(cy),' 30','0.000',' 40',f(th*1.2),'  1',fr.mapNumber,
+          ' 72','1',' 73','2',' 11',f(cx),' 21',f(cy),' 31','0.000');
+      }
+    }
+  }
+
+  e('  0','ENDSEC','  0','EOF');
+  return o.join('\n');
+}
+</script>
+</body>
+</html>
